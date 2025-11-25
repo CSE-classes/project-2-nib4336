@@ -14,6 +14,9 @@ extern uint vectors[];  // in vectors.S: array of 256 entry pointers
 struct spinlock tickslock;
 uint ticks;
 
+int mappages(pde_t *pgdir, void *va, uint size, uint pa, int perm);
+
+
 void
 tvinit(void)
 {
@@ -48,11 +51,42 @@ trap(struct trapframe *tf)
  // CS 3320 project 2
  // You might need to change the folloiwng default page fault handling
  // for your project 2
- if(tf->trapno == T_PGFLT){                 // CS 3320 project 2
-    uint faulting_va;                       // CS 3320 project 2
-    faulting_va = rcr2();                   // CS 3320 project 2
-    cprintf("Unhandled page fault for va:0x%x!\n", faulting_va);     // CS 3320 project 2
- }
+
+ //Lazy page allocation handler for trap()
+if(tf->trapno == T_PGFLT) {
+  uint faultaddr = rcr2();                 // faulting linear address (CR2)
+  struct proc *p = myproc();
+  void *va_page = (void*)PGROUNDDOWN(faultaddr);
+
+  // If no current process or the fault happened in kernel mode
+  if (p == 0 || (tf->cs & 3) == 0) {
+    goto pf_unhandled;
+  }
+
+  // If LAZY allocator is enabled & the faulting address is within the heap
+  // allocate & map a page.
+  if (page_allocator_type == 1 && (uint)faultaddr < p->sz) {
+    char *mem = kalloc();
+    if (mem == 0) {
+      cprintf("Allocating pages failed!\n");
+      goto pf_unhandled;
+    }
+    // Zero the page, then map it
+    memset(mem, 0, PGSIZE);
+    if (mappages(p->pgdir, va_page, PGSIZE, V2P(mem), PTE_W | PTE_U) < 0) {
+      // mapping failed
+      kfree(mem);
+      cprintf("Allocating pages failed!\n");
+      goto pf_unhandled;
+    }
+    return;
+  }
+  // If not LAZY or fault address is outside heap
+pf_unhandled:
+  cprintf("Unhandled page fault!\n");
+
+}
+
 
 
   switch(tf->trapno){
