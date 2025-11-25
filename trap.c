@@ -62,7 +62,7 @@ if(tf->trapno == T_PGFLT){
       cprintf("Unhandled page fault!\n");
     } else {
       // If lazy allocator is enabled and the faulting VA is inside the heap region
-      if(page_allocator_type == 1 && faulting_va < proc->sz){
+      if(page_allocator_type == 1 && faulting_va < proc->sz + 1){
         void *va_page = (void*)PGROUNDDOWN(faulting_va);
 
         // allocate a physical page
