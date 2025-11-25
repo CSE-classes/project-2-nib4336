@@ -15,7 +15,7 @@ struct spinlock tickslock;
 uint ticks;
 extern int page_allocator_type;
 int mappages(pde_t *pgdir, void *va, uint size, uint pa, int perm);
-struct proc* myproc(void);
+
 
 
 void
@@ -54,39 +54,40 @@ trap(struct trapframe *tf)
  // for your project 2
 
  //Lazy page allocation handler for trap()
-if(tf->trapno == T_PGFLT) {
-  uint faultaddr = rcr2();                 // faulting linear address (CR2)
-  struct proc *p = myproc();
-  void *va_page = (void*)PGROUNDDOWN(faultaddr);
+if(tf->trapno == T_PGFLT){
+    uint faulting_va = rcr2();
 
-  // If no current process or the fault happened in kernel mode
-  if (p == 0 || (tf->cs & 3) == 0) {
-    goto pf_unhandled;
-  }
+    // If no current process or we're in kernel mode, we treat it as unhandled
+    if(proc == 0 || (tf->cs & 3) == 0){
+      cprintf("Unhandled page fault!\n");
+    } else {
+      // If lazy allocator is enabled and the faulting VA is inside the heap region
+      if(page_allocator_type == 1 && faulting_va < proc->sz){
+        void *va_page = (void*)PGROUNDDOWN(faulting_va);
 
-  // If LAZY allocator is enabled & the faulting address is within the heap
-  // allocate & map a page.
-  if (page_allocator_type == 1 && (uint)faultaddr < p->sz) {
-    char *mem = kalloc();
-    if (mem == 0) {
-      cprintf("Allocating pages failed!\n");
-      goto pf_unhandled;
+        // allocate a physical page
+        char *mem = kalloc();
+        if(mem == 0){
+          // cannot get memory; behave like failed sbrk
+          cprintf("Allocating pages failed!\n");
+          cprintf("Unhandled page fault!\n");
+        } else {
+          memset(mem, 0, PGSIZE);
+          if(mappages(proc->pgdir, va_page, PGSIZE, V2P(mem), PTE_W | PTE_U) < 0){
+            // mapping failed; clean up and treat as unhandled
+            kfree(mem);
+            cprintf("Allocating pages failed!\n");
+            cprintf("Unhandled page fault!\n");
+          } else {
+            return;
+          }
+        }
+      } else {
+        // Not in heap or not using lazy allocator
+        cprintf("Unhandled page fault!\n");
+      }
     }
-    // Zero the page, then map it
-    memset(mem, 0, PGSIZE);
-    if (mappages(p->pgdir, va_page, PGSIZE, V2P(mem), PTE_W | PTE_U) < 0) {
-      // mapping failed
-      kfree(mem);
-      cprintf("Allocating pages failed!\n");
-      goto pf_unhandled;
-    }
-    return;
   }
-  // If not LAZY or fault address is outside heap
-pf_unhandled:
-  cprintf("Unhandled page fault!\n");
-
-}
 
 
 
